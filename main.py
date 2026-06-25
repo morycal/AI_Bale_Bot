@@ -1,6 +1,5 @@
 import requests
 import asyncio
-import aiosqlite
 import os
 from dotenv import load_dotenv
 
@@ -31,7 +30,7 @@ def send_photo(chat_id, img_bytes):
             BASE + "/sendPhoto",
             data={"chat_id": chat_id},
             files={"photo": ("img.png", img_bytes)},
-            timeout=30
+            timeout=60
         )
     except Exception as e:
         print("PHOTO ERROR:", e)
@@ -49,64 +48,60 @@ def get_updates():
         return {"result": []}
 
 
-# ================= AI CHAT (HF ROUTER) =================
+# ================= CHAT AI =================
 
 def ask_ai(text):
     try:
         res = requests.post(
-            "https://router.huggingface.co/v1/chat/completions",
+            "https://api-inference.huggingface.co/models/Qwen/Qwen3-32B",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            json={
-                "model": "Qwen/Qwen3-32B",
-                "messages": [
-                    {"role": "system", "content": "تو یک دستیار هوش مصنوعی فارسی هستی."},
-                    {"role": "user", "content": text}
-                ]
-            },
+            json={"inputs": text},
             timeout=60
         )
 
-        data = res.json()
-        print("AI:", data)
+        print("AI STATUS:", res.status_code)
+        print("AI TEXT:", res.text[:200])
 
-        return data["choices"][0]["message"]["content"]
+        data = res.json()
+
+        # بعضی مدل‌ها لیست میدن
+        if isinstance(data, list):
+            return data[0].get("generated_text", "")
+
+        if isinstance(data, dict):
+            return data.get("generated_text", str(data))
+
+        return "❌ پاسخ نامعتبر"
 
     except Exception as e:
         return f"❌ AI Error: {e}"
 
 
-# ================= IMAGE (SAFE MODE) =================
+# ================= IMAGE (CORRECT HF METHOD) =================
 
 def generate_image(prompt):
     try:
         res = requests.post(
-            "https://router.huggingface.co/v1/images/generations",
+            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            json={
-                "model": "stabilityai/stable-diffusion-xl-base-1.0",
-                "prompt": prompt
-            },
+            json={"inputs": prompt},
             timeout=120
         )
 
-        print("IMG:", res.text[:200])
+        print("IMG STATUS:", res.status_code)
+        print("IMG TEXT:", res.text[:200])
 
-        data = res.json()
+        if res.status_code != 200:
+            return None
 
-        # اگر لینک داد
-        if "data" in data and len(data["data"]) > 0:
-            url = data["data"][0].get("url")
-            if url:
-                return requests.get(url).content
-
-        return None
+        return res.content
 
     except Exception as e:
         print("IMG ERROR:", e)
         return None
 
 
-# ================= VOICE (FALLBACK SAFE) =================
+# ================= VOICE (CORRECT HF METHOD) =================
 
 def download_voice(file_id):
     try:
@@ -117,25 +112,32 @@ def download_voice(file_id):
 
         return requests.get(url).content
 
-    except:
+    except Exception as e:
+        print("VOICE DOWNLOAD ERROR:", e)
         return None
 
 
 def voice_to_text(audio):
     try:
         res = requests.post(
-            "https://router.huggingface.co/v1/audio/transcriptions",
+            "https://api-inference.huggingface.co/models/openai/whisper-small",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            files={"file": audio},
-            data={"model": "openai/whisper-small"},
+            data=audio,
             timeout=120
         )
 
-        print("VOICE:", res.text[:200])
+        print("VOICE STATUS:", res.status_code)
+        print("VOICE TEXT:", res.text[:200])
+
+        if res.status_code != 200:
+            return ""
 
         data = res.json()
 
-        return data.get("text", "")
+        if isinstance(data, dict):
+            return data.get("text", "")
+
+        return ""
 
     except Exception as e:
         print("VOICE ERROR:", e)
@@ -148,7 +150,7 @@ async def main():
 
     global offset
 
-    print("🤖 ROBUST BOT ONLINE")
+    print("🤖 BOT FIXED VERSION ONLINE")
 
     while True:
 
@@ -161,20 +163,14 @@ async def main():
             msg = update.get("message", {})
             text = msg.get("text", "")
             chat_id = msg.get("chat", {}).get("id")
-            user_id = msg.get("from", {}).get("id")
             voice = msg.get("voice")
 
             if not chat_id:
                 continue
 
-            # ================= RESET =================
-            if text == "/reset":
-                send(chat_id, "🧹 انجام شد")
-                continue
-
             # ================= VOICE =================
             if voice:
-                send(chat_id, "🎧 در حال پردازش...")
+                send(chat_id, "🎧 در حال پردازش ویس...")
 
                 audio = download_voice(voice["file_id"])
 
@@ -182,15 +178,15 @@ async def main():
                     send(chat_id, "❌ ویس دانلود نشد")
                     continue
 
-                vtext = voice_to_text(audio)
+                text_v = voice_to_text(audio)
 
-                if not vtext:
+                if not text_v:
                     send(chat_id, "❌ ویس قابل تشخیص نیست")
                     continue
 
-                send(chat_id, f"📝 {vtext}")
+                send(chat_id, f"📝 متن: {text_v}")
 
-                answer = ask_ai(vtext)
+                answer = ask_ai(text_v)
 
                 send(chat_id, answer[:3500])
                 continue
@@ -200,7 +196,7 @@ async def main():
                 prompt = text.replace("/img", "").strip()
 
                 if not prompt:
-                    send(chat_id, "❌ متن بده")
+                    send(chat_id, "❌ متن تصویر بده")
                     continue
 
                 send(chat_id, "🎨 در حال ساخت تصویر...")
@@ -210,7 +206,7 @@ async def main():
                 if img:
                     send_photo(chat_id, img)
                 else:
-                    send(chat_id, "❌ ساخت تصویر فعلاً ممکن نیست")
+                    send(chat_id, "❌ تصویر ساخته نشد")
 
                 continue
 
