@@ -60,19 +60,31 @@ def ask_ai(text):
             json={
                 "model": "llama-3.1-70b-versatile",
                 "messages": [
-                    {"role": "system", "content": "تو یک دستیار هوش مصنوعی فارسی حرفه‌ای هستی."},
-                    {"role": "user", "content": text}
+                    {
+                        "role": "system",
+                        "content": "تو یک دستیار هوش مصنوعی فارسی هستی."
+                    },
+                    {
+                        "role": "user",
+                        "content": text
+                    }
                 ]
             },
-            timeout=30
+            timeout=60
         )
 
         data = res.json()
+
+        print("GROQ STATUS:", res.status_code)
+        print("GROQ RESPONSE:", data)
+
+        if "choices" not in data:
+            return f"❌ GROQ ERROR: {data}"
+
         return data["choices"][0]["message"]["content"]
 
     except Exception as e:
-        return f"❌ AI Error: {e}"
-
+        return f"❌ AI ERROR: {e}"
 
 # ================= IMAGE (REPLICATE) =================
 
