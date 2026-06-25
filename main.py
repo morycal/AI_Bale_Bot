@@ -1,6 +1,8 @@
 import requests
 import asyncio
 import os
+import time
+from urllib.parse import quote
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -89,115 +91,26 @@ def ask_ai(text):
 # ================= IMAGE (REPLICATE) =================
 
 def generate_image(prompt):
+    try:
+        url = f"https://image.pollinations.ai/prompt/{quote(prompt)}"
 
-    headers = {
-        "Authorization": f"Token {REPLICATE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
+        img = requests.get(
+            url,
+            timeout=120
+        )
 
-    create = requests.post(
-        "https://api.replicate.com/v1/predictions",
-        headers=headers,
-        json={
-            "model": "black-forest-labs/flux-schnell",
-            "input": {
-                "prompt": prompt
-            }
-        },
-        timeout=30
-    )
+        if img.status_code == 200:
+            return img.content
 
-    data = create.json()
-
-    if "urls" not in data:
-        print(data)
+        print("IMG STATUS:", img.status_code)
         return None
 
-    get_url = data["urls"]["get"]
-
-    for _ in range(30):
-
-        result = requests.get(
-            get_url,
-            headers=headers,
-            timeout=30
-        ).json()
-
-        if result["status"] == "succeeded":
-
-            output = result.get("output")
-
-            if isinstance(output, list):
-                img_url = output[0]
-            else:
-                img_url = output
-
-            return requests.get(img_url).content
-
-        if result["status"] in ["failed", "canceled"]:
-            print(result)
-            return None
-
-        time.sleep(2)
-
-    return None
+    except Exception as e:
+        print("IMG ERROR:", e)
+        return None
 
 # ================= VOICE (REPLICATE WHISPER) =================
 
-def voice_to_text(audio_url):
-
-    headers = {
-        "Authorization": f"Token {REPLICATE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    create = requests.post(
-        "https://api.replicate.com/v1/predictions",
-        headers=headers,
-        json={
-            "model": "openai/whisper",
-            "input": {
-                "audio": audio_url
-            }
-        },
-        timeout=30
-    )
-
-    data = create.json()
-
-    if "urls" not in data:
-        print(data)
-        return ""
-
-    get_url = data["urls"]["get"]
-
-    for _ in range(30):
-
-        result = requests.get(
-            get_url,
-            headers=headers,
-            timeout=30
-        ).json()
-
-        if result["status"] == "succeeded":
-
-            output = result.get("output")
-
-            if isinstance(output, str):
-                return output
-
-            if isinstance(output, dict):
-                return output.get("text", "")
-
-            return str(output)
-
-        if result["status"] in ["failed", "canceled"]:
-            print(result)
-            return ""
-
-        time.sleep(2)
-
-    return ""
 
 
 # ================= MAIN LOOP =================
@@ -227,26 +140,28 @@ async def main():
 
             # ================= VOICE =================
             if voice:
-                send(chat_id, "🎧 در حال تبدیل ویس...")
-
-                # فعلاً ساده (بعداً فایل کامل می‌کنیم)
-                send(chat_id, "⚠️ ویس در نسخه بعد کامل می‌شود")
-                continue
+    send(chat_id, "🎧 قابلیت ویس در نسخه بعدی فعال می‌شود.")
+    continue
 
             # ================= IMAGE =================
             if text.startswith("/img"):
-                prompt = text.replace("/img", "").strip()
 
-                send(chat_id, "🎨 در حال ساخت تصویر...")
+    prompt = text.replace("/img", "").strip()
 
-                img = generate_image(prompt)
+    if not prompt:
+        send(chat_id, "❌ بعد از /img توضیح تصویر را بنویس")
+        continue
 
-                if img:
-                    send_photo(chat_id, img)
-                else:
-                    send(chat_id, "❌ تصویر ساخته نشد")
+    send(chat_id, "🎨 در حال ساخت تصویر...")
 
-                continue
+    img = generate_image(prompt)
+
+    if img:
+        send_photo(chat_id, img)
+    else:
+        send(chat_id, "❌ تصویر ساخته نشد")
+
+    continue
 
             # ================= CHAT =================
             if not text:
