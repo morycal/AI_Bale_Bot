@@ -1,7 +1,6 @@
 import requests
 import asyncio
 import os
-import time
 from urllib.parse import quote
 from dotenv import load_dotenv
 
@@ -9,51 +8,80 @@ load_dotenv()
 
 BALE_TOKEN = os.getenv("BALE_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 BASE = f"https://tapi.bale.ai/bot{BALE_TOKEN}"
+
 offset = None
 
 
-# ================= SEND =================
+# ================= SEND MESSAGE =================
 
 def send(chat_id, text):
     try:
-        requests.post(BASE + "/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text
-        })
-    except:
-        pass
-
-
-def send_photo(chat_id, img_bytes):
-    try:
-        requests.post(
-            BASE + "/sendPhoto",
-            data={"chat_id": chat_id},
-            files={"photo": ("img.png", img_bytes)}
+        r = requests.post(
+            BASE + "/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text
+            },
+            timeout=20
         )
-    except:
-        pass
+
+        print("SEND:", r.status_code)
+
+    except Exception as e:
+        print("SEND ERROR:", e)
 
 
-# ================= UPDATES =================
+# ================= SEND PHOTO =================
+
+def send_photo(chat_id, image_bytes):
+    try:
+        r = requests.post(
+            BASE + "/sendPhoto",
+            data={
+                "chat_id": chat_id
+            },
+            files={
+                "photo": ("image.png", image_bytes)
+            },
+            timeout=120
+        )
+
+        print("PHOTO:", r.status_code)
+        print(r.text)
+
+    except Exception as e:
+        print("PHOTO ERROR:", e)
+
+
+# ================= GET UPDATES =================
 
 def get_updates():
     global offset
+
     try:
-        r = requests.get(BASE + "/getUpdates", params={"offset": offset}, timeout=30)
+        r = requests.get(
+            BASE + "/getUpdates",
+            params={
+                "offset": offset
+            },
+            timeout=30
+        )
+
         return r.json()
-    except:
+
+    except Exception as e:
+        print("UPDATE ERROR:", e)
         return {"result": []}
 
 
-# ================= AI (GROQ - FAST CHATGPT) =================
+# ================= AI =================
 
 def ask_ai(text):
     try:
-        res = requests.post(
+
+        r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -64,7 +92,7 @@ def ask_ai(text):
                 "messages": [
                     {
                         "role": "system",
-                        "content": "تو یک دستیار هوش مصنوعی فارسی هستی."
+                        "content": "تو یک دستیار هوش مصنوعی فارسی حرفه‌ای هستی."
                     },
                     {
                         "role": "user",
@@ -75,51 +103,51 @@ def ask_ai(text):
             timeout=60
         )
 
-        data = res.json()
+        data = r.json()
 
-        print("GROQ STATUS:", res.status_code)
+        print("GROQ STATUS:", r.status_code)
         print("GROQ RESPONSE:", data)
 
         if "choices" not in data:
-            return f"❌ GROQ ERROR: {data}"
+            return f"❌ GROQ ERROR\n{data}"
 
         return data["choices"][0]["message"]["content"]
 
     except Exception as e:
         return f"❌ AI ERROR: {e}"
 
-# ================= IMAGE (REPLICATE) =================
+
+# ================= IMAGE =================
 
 def generate_image(prompt):
     try:
+
         url = f"https://image.pollinations.ai/prompt/{quote(prompt)}"
 
-        img = requests.get(
+        r = requests.get(
             url,
             timeout=120
         )
 
-        if img.status_code == 200:
-            return img.content
+        print("IMG STATUS:", r.status_code)
 
-        print("IMG STATUS:", img.status_code)
+        if r.status_code == 200:
+            return r.content
+
         return None
 
     except Exception as e:
         print("IMG ERROR:", e)
         return None
 
-# ================= VOICE (REPLICATE WHISPER) =================
 
-
-
-# ================= MAIN LOOP =================
+# ================= MAIN =================
 
 async def main():
 
     global offset
 
-    print("🤖 GROQ + REPLICATE BOT ONLINE")
+    print("🤖 FREE AI BOT ONLINE")
 
     while True:
 
@@ -127,51 +155,99 @@ async def main():
 
         for update in data.get("result", []):
 
-            offset = update["update_id"] + 1
+            try:
 
-            msg = update.get("message", {})
-            text = msg.get("text", "")
-            chat_id = msg.get("chat", {}).get("id")
+                offset = update["update_id"] + 1
 
-            voice = msg.get("voice")
+                msg = update.get("message", {})
 
-            if not chat_id:
-                continue
+                text = msg.get("text", "")
+                chat_id = msg.get("chat", {}).get("id")
 
-            # ================= VOICE =================
-            if voice:
-    send(chat_id, "🎧 قابلیت ویس در نسخه بعدی فعال می‌شود.")
-    continue
+                if not chat_id:
+                    continue
 
-            # ================= IMAGE =================
-            if text.startswith("/img"):
+                # ===== START =====
 
-    prompt = text.replace("/img", "").strip()
+                if text == "/start":
 
-    if not prompt:
-        send(chat_id, "❌ بعد از /img توضیح تصویر را بنویس")
-        continue
+                    send(
+                        chat_id,
+                        "👋 سلام\n\n"
+                        "دستورات:\n"
+                        "/img متن تصویر\n"
+                        "/help"
+                    )
 
-    send(chat_id, "🎨 در حال ساخت تصویر...")
+                    continue
 
-    img = generate_image(prompt)
+                # ===== HELP =====
 
-    if img:
-        send_photo(chat_id, img)
-    else:
-        send(chat_id, "❌ تصویر ساخته نشد")
+                if text == "/help":
 
-    continue
+                    send(
+                        chat_id,
+                        "🧠 چت هوش مصنوعی\n"
+                        "🎨 ساخت تصویر:\n"
+                        "/img گربه فضانورد"
+                    )
 
-            # ================= CHAT =================
-            if not text:
-                continue
+                    continue
 
-            send(chat_id, "⏳ فکر می‌کنم...")
+                # ===== IMAGE =====
 
-            answer = ask_ai(text)
+                if text.startswith("/img"):
 
-            send(chat_id, answer[:3500])
+                    prompt = text.replace("/img", "").strip()
+
+                    if not prompt:
+
+                        send(
+                            chat_id,
+                            "❌ بعد از /img توضیح تصویر را بنویس"
+                        )
+
+                        continue
+
+                    send(
+                        chat_id,
+                        "🎨 در حال ساخت تصویر..."
+                    )
+
+                    img = generate_image(prompt)
+
+                    if img:
+                        send_photo(chat_id, img)
+                    else:
+                        send(
+                            chat_id,
+                            "❌ تصویر ساخته نشد"
+                        )
+
+                    continue
+
+                # ===== CHAT =====
+
+                if not text:
+                    continue
+
+                send(
+                    chat_id,
+                    "⏳ در حال فکر کردن..."
+                )
+
+                answer = ask_ai(text)
+
+                send(
+                    chat_id,
+                    answer[:3500]
+                )
+
+            except Exception as e:
+
+                print("MESSAGE ERROR:", e)
+
+        await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
