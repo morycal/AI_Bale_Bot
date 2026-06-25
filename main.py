@@ -106,7 +106,7 @@ async def get_memory(uid):
 def engine_deepseek(messages):
     return requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+        headers={"Authorization": f"Bearer {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}"},
         json={
             "model": "deepseek/deepseek-r1:free",
             "messages": messages
