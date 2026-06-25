@@ -16,31 +16,22 @@ FREE_LIMIT = 30
 VIP_LIMIT = 300
 
 
-# ---------------- HTTP SEND (قطعی و بدون کتابخانه) ----------------
+# ================= HTTP SEND =================
 
-def send_message(chat_id, text):
-    url = BASE_URL + "sendMessage"
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
-
-
-# ---------------- GET UPDATES ----------------
-
-def get_updates(offset=None):
-    url = BASE_URL + "getUpdates"
-    if offset:
-        url += f"?offset={offset}"
-    r = requests.get(url)
-    return r.json()
+def send(chat_id, text):
+    try:
+        requests.post(BASE_URL + "sendMessage", json={
+            "chat_id": chat_id,
+            "text": text
+        })
+    except:
+        pass
 
 
-# ---------------- DB ----------------
+# ================= DATABASE =================
 
 async def init_db():
     async with aiosqlite.connect("bot.db") as db:
-
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users(
             user_id INTEGER PRIMARY KEY,
@@ -65,12 +56,10 @@ async def init_db():
 
 async def get_user(uid, name):
     async with aiosqlite.connect("bot.db") as db:
-
         cur = await db.execute(
             "SELECT user_id,name,count,banned,vip FROM users WHERE user_id=?",
             (uid,)
         )
-
         u = await cur.fetchone()
 
         if not u:
@@ -93,8 +82,6 @@ async def add_count(uid):
         await db.commit()
 
 
-# ---------------- MEMORY ----------------
-
 async def save_memory(uid, role, content):
     async with aiosqlite.connect("bot.db") as db:
         await db.execute(
@@ -111,99 +98,134 @@ async def get_memory(uid):
             (uid,)
         )
         rows = await cur.fetchall()
-        return [{"role": r[0], "content": r[1]} for r in rows][-15:]
+        return [{"role": r[0], "content": r[1]} for r in rows][-20:]
 
 
-# ---------------- AI ----------------
+# ================= AI ENGINES =================
 
-def ask_ai(messages):
-    res = requests.post(
+def engine_deepseek(messages):
+    return requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
         json={
             "model": "deepseek/deepseek-r1:free",
             "messages": messages
         },
-        timeout=60
+        timeout=30
     )
-    data = res.json()
-    return data["choices"][0]["message"]["content"]
 
 
-# ---------------- MAIN LOOP ----------------
+def engine_llama(messages):
+    return requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+        json={
+            "model": "meta-llama/llama-3-8b-instruct:free",
+            "messages": messages
+        },
+        timeout=30
+    )
+
+
+def engine_fallback():
+    return "⚠️ الان همه AI ها در دسترس نیستند، دوباره تلاش کنید."
+
+
+# ================= AI ROUTER =================
+
+def ask_ai(messages):
+
+    engines = [engine_deepseek, engine_llama]
+
+    for engine in engines:
+        try:
+            res = engine(messages)
+            data = res.json()
+
+            if "choices" in data and data["choices"]:
+                return data["choices"][0]["message"]["content"]
+
+        except:
+            continue
+
+    return engine_fallback()
+
+
+# ================= MAIN LOOP =================
 
 async def main():
     await init_db()
 
-    print("🤖 BOT STARTED (HTTP MODE)")
+    print("🤖 CHATGPT MULTI-ENGINE BOT ONLINE")
 
     offset = None
 
     while True:
-        updates = get_updates(offset)
+        try:
+            r = requests.get(BASE_URL + "getUpdates", params={"offset": offset}).json()
 
-        for update in updates.get("result", []):
+            for update in r.get("result", []):
 
-            offset = update["update_id"] + 1
+                offset = update["update_id"] + 1
 
-            msg = update.get("message", {})
-            text = msg.get("text", "")
-            chat_id = msg.get("chat", {}).get("id")
-            user = msg.get("from", {})
-            uid = user.get("id")
-            name = user.get("first_name", "user")
+                msg = update.get("message", {})
+                text = msg.get("text", "")
+                chat_id = msg.get("chat", {}).get("id")
+                user = msg.get("from", {})
+                uid = user.get("id")
+                name = user.get("first_name", "user")
 
-            if not text:
-                continue
+                if not text:
+                    continue
 
-            db_user = await get_user(uid, name)
+                db_user = await get_user(uid, name)
 
-            if db_user["banned"]:
-                continue
+                if db_user["banned"]:
+                    continue
 
-            # START
-            if text == "/start":
-                send_message(chat_id, "👋 سلام! من ChatGPT شما هستم.")
-                continue
+                # START
+                if text == "/start":
+                    send(chat_id, "👋 سلام! من ChatGPT چندموتوره هستم 🤖")
+                    continue
 
-            # RESET
-            if text == "/reset":
-                async with aiosqlite.connect("bot.db") as db:
-                    await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
-                    await db.commit()
-                send_message(chat_id, "🧹 حافظه پاک شد")
-                continue
+                # RESET
+                if text == "/reset":
+                    async with aiosqlite.connect("bot.db") as db:
+                        await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
+                        await db.commit()
+                    send(chat_id, "🧹 حافظه پاک شد")
+                    continue
 
-            # LIMIT
-            limit = VIP_LIMIT if db_user["vip"] else FREE_LIMIT
+                # LIMIT
+                limit = VIP_LIMIT if db_user["vip"] else FREE_LIMIT
 
-            if uid != ADMIN_ID and db_user["count"] >= limit:
-                send_message(chat_id, "❌ سهمیه تمام شد")
-                continue
+                if uid != ADMIN_ID and db_user["count"] >= limit:
+                    send(chat_id, "❌ سهمیه شما تمام شد")
+                    continue
 
-            await add_count(uid)
+                await add_count(uid)
 
-            send_message(chat_id, "⏳ در حال فکر کردن...")
+                send(chat_id, "⏳ در حال فکر کردن...")
 
-            memory = await get_memory(uid)
+                memory = await get_memory(uid)
 
-            system = {
-                "role": "system",
-                "content": "تو یک دستیار هوش مصنوعی حرفه‌ای مثل ChatGPT هستی."
-            }
+                system = {
+                    "role": "system",
+                    "content": "تو یک دستیار هوشمند حرفه‌ای مثل ChatGPT هستی."
+                }
 
-            memory.append({"role": "user", "content": text})
+                messages = [system] + memory + [{"role": "user", "content": text}]
 
-            try:
-                answer = ask_ai([system] + memory)
+                answer = ask_ai(messages)
 
-                send_message(chat_id, answer[:3500])
+                send(chat_id, answer[:3500])
 
                 await save_memory(uid, "user", text)
                 await save_memory(uid, "assistant", answer)
 
-            except Exception as e:
-                send_message(chat_id, f"خطا: {e}")
+        except Exception as e:
+            print("ERROR:", e)
+            await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
