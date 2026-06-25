@@ -125,18 +125,22 @@ async def ask_ai(uid, text):
 def generate_image(prompt):
     try:
         res = requests.post(
-            "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev",
+            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
             json={"inputs": prompt},
             timeout=120
         )
+
+        print("IMG STATUS:", res.status_code)
+        print("IMG BODY:", res.text[:200])
 
         if res.status_code != 200:
             return None
 
         return res.content
 
-    except:
+    except Exception as e:
+        print("IMG ERROR:", e)
         return None
 
 
@@ -158,17 +162,25 @@ def download_voice(file_id):
 def voice_to_text(audio):
     try:
         res = requests.post(
-            "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+            "https://api-inference.huggingface.co/models/openai/whisper-small",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
             data=audio,
             timeout=120
         )
 
+        print("VOICE STATUS:", res.status_code)
+        print("VOICE BODY:", res.text[:200])
+
         data = res.json()
 
-        return data.get("text", "")
+        # بعضی مدل‌ها این شکلی جواب میدن
+        if isinstance(data, dict):
+            return data.get("text") or data.get("result", "")
 
-    except:
+        return ""
+
+    except Exception as e:
+        print("VOICE ERROR:", e)
         return ""
 
 
