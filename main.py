@@ -42,29 +42,40 @@ def get_updates():
 # ================= AI =================
 
 def ask_ai(text):
-    try:
-        res = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-            json={
-                "model": "deepseek/deepseek-r1:free",
-                "messages": [
-                    {"role": "system", "content": "تو یک دستیار هوشمند هستی."},
-                    {"role": "user", "content": text}
-                ]
-            },
-            timeout=30
-        )
 
-        data = res.json()
+    models = [
+        "meta-llama/llama-3.3-8b-instruct:free",
+        "google/gemma-2-9b-it:free",
+        "mistralai/mistral-7b-instruct:free"
+    ]
 
-        if "choices" not in data:
-            return f"❌ API ERROR: {data}"
+    for model in models:
+        try:
+            res = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "تو یک دستیار هوشمند هستی."},
+                        {"role": "user", "content": text}
+                    ]
+                },
+                timeout=30
+            )
 
-        return data["choices"][0]["message"]["content"]
+            data = res.json()
 
-    except Exception as e:
-        return f"❌ AI ERROR: {str(e)}"
+            if "choices" in data:
+                return data["choices"][0]["message"]["content"]
+
+        except:
+            pass
+
+    return "❌ هیچ مدل AI در دسترس نیست."
 
 
 # ================= LOOP =================
