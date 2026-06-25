@@ -8,10 +8,8 @@ load_dotenv()
 
 TOKEN = os.getenv("BALE_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 BASE = f"https://tapi.bale.ai/bot{TOKEN}"
-
 offset = None
 
 
@@ -22,97 +20,54 @@ def send(chat_id, text):
         requests.post(BASE + "/sendMessage", json={
             "chat_id": chat_id,
             "text": text
-        })
-    except:
-        pass
+        }, timeout=15)
+    except Exception as e:
+        print("SEND ERROR:", e)
 
 
-def send_photo(chat_id, image_bytes):
+def send_photo(chat_id, img_bytes):
     try:
         requests.post(
             BASE + "/sendPhoto",
             data={"chat_id": chat_id},
-            files={"photo": ("img.png", image_bytes)}
+            files={"photo": ("img.png", img_bytes)},
+            timeout=30
         )
-    except:
-        pass
+    except Exception as e:
+        print("PHOTO ERROR:", e)
 
 
-# ================= UPDATE =================
+# ================= UPDATES =================
 
 def get_updates():
     global offset
     try:
         r = requests.get(BASE + "/getUpdates", params={"offset": offset}, timeout=30)
         return r.json()
-    except:
+    except Exception as e:
+        print("UPDATE ERROR:", e)
         return {"result": []}
 
 
-# ================= DB =================
+# ================= AI CHAT (HF ROUTER) =================
 
-async def init_db():
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS memory(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            role TEXT,
-            content TEXT
-        )
-        """)
-        await db.commit()
-
-
-async def save_memory(uid, role, content):
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute(
-            "INSERT INTO memory(user_id,role,content) VALUES(?,?,?)",
-            (uid, role, content)
-        )
-        await db.commit()
-
-
-async def get_memory(uid):
-    async with aiosqlite.connect("bot.db") as db:
-        cur = await db.execute(
-            "SELECT role,content FROM memory WHERE user_id=? ORDER BY id DESC LIMIT 20",
-            (uid,)
-        )
-        rows = await cur.fetchall()
-
-    rows.reverse()
-
-    return [{"role": r[0], "content": r[1]} for r in rows]
-
-
-# ================= AI CHAT =================
-
-async def ask_ai(uid, text):
-
-    history = await get_memory(uid)
-
-    messages = [
-        {"role": "system", "content": "تو یک دستیار حرفه‌ای فارسی هستی."}
-    ] + history + [
-        {"role": "user", "content": text}
-    ]
-
+def ask_ai(text):
     try:
         res = requests.post(
             "https://router.huggingface.co/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {HF_TOKEN}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {HF_TOKEN}"},
             json={
                 "model": "Qwen/Qwen3-32B",
-                "messages": messages
+                "messages": [
+                    {"role": "system", "content": "تو یک دستیار هوش مصنوعی فارسی هستی."},
+                    {"role": "user", "content": text}
+                ]
             },
             timeout=60
         )
 
         data = res.json()
+        print("AI:", data)
 
         return data["choices"][0]["message"]["content"]
 
@@ -120,31 +75,38 @@ async def ask_ai(uid, text):
         return f"❌ AI Error: {e}"
 
 
-# ================= IMAGE =================
+# ================= IMAGE (SAFE MODE) =================
 
 def generate_image(prompt):
     try:
         res = requests.post(
-            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+            "https://router.huggingface.co/v1/images/generations",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            json={"inputs": prompt},
+            json={
+                "model": "stabilityai/stable-diffusion-xl-base-1.0",
+                "prompt": prompt
+            },
             timeout=120
         )
 
-        print("IMG STATUS:", res.status_code)
-        print("IMG BODY:", res.text[:200])
+        print("IMG:", res.text[:200])
 
-        if res.status_code != 200:
-            return None
+        data = res.json()
 
-        return res.content
+        # اگر لینک داد
+        if "data" in data and len(data["data"]) > 0:
+            url = data["data"][0].get("url")
+            if url:
+                return requests.get(url).content
+
+        return None
 
     except Exception as e:
         print("IMG ERROR:", e)
         return None
 
 
-# ================= VOICE =================
+# ================= VOICE (FALLBACK SAFE) =================
 
 def download_voice(file_id):
     try:
@@ -162,37 +124,31 @@ def download_voice(file_id):
 def voice_to_text(audio):
     try:
         res = requests.post(
-            "https://api-inference.huggingface.co/models/openai/whisper-small",
+            "https://router.huggingface.co/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            data=audio,
+            files={"file": audio},
+            data={"model": "openai/whisper-small"},
             timeout=120
         )
 
-        print("VOICE STATUS:", res.status_code)
-        print("VOICE BODY:", res.text[:200])
+        print("VOICE:", res.text[:200])
 
         data = res.json()
 
-        # بعضی مدل‌ها این شکلی جواب میدن
-        if isinstance(data, dict):
-            return data.get("text") or data.get("result", "")
-
-        return ""
+        return data.get("text", "")
 
     except Exception as e:
         print("VOICE ERROR:", e)
         return ""
 
 
-# ================= LOOP =================
+# ================= MAIN LOOP =================
 
 async def main():
 
     global offset
 
-    await init_db()
-
-    print("🤖 MULTI CHATGPT BOT ONLINE")
+    print("🤖 ROBUST BOT ONLINE")
 
     while True:
 
@@ -206,7 +162,6 @@ async def main():
             text = msg.get("text", "")
             chat_id = msg.get("chat", {}).get("id")
             user_id = msg.get("from", {}).get("id")
-
             voice = msg.get("voice")
 
             if not chat_id:
@@ -214,37 +169,30 @@ async def main():
 
             # ================= RESET =================
             if text == "/reset":
-                async with aiosqlite.connect("bot.db") as db:
-                    await db.execute("DELETE FROM memory WHERE user_id=?", (user_id,))
-                    await db.commit()
-                send(chat_id, "🧹 حافظه پاک شد")
+                send(chat_id, "🧹 انجام شد")
                 continue
 
             # ================= VOICE =================
             if voice:
-                send(chat_id, "🎧 در حال پردازش ویس...")
+                send(chat_id, "🎧 در حال پردازش...")
 
                 audio = download_voice(voice["file_id"])
 
                 if not audio:
-                    send(chat_id, "❌ خطا در دریافت ویس")
+                    send(chat_id, "❌ ویس دانلود نشد")
                     continue
 
-                text = voice_to_text(audio)
+                vtext = voice_to_text(audio)
 
-                if not text:
-                    send(chat_id, "❌ ویس قابل تشخیص نبود")
+                if not vtext:
+                    send(chat_id, "❌ ویس قابل تشخیص نیست")
                     continue
 
-                send(chat_id, f"📝 متن:\n{text}")
+                send(chat_id, f"📝 {vtext}")
 
-                answer = await ask_ai(user_id, text)
+                answer = ask_ai(vtext)
 
                 send(chat_id, answer[:3500])
-
-                await save_memory(user_id, "user", text)
-                await save_memory(user_id, "assistant", answer)
-
                 continue
 
             # ================= IMAGE =================
@@ -252,7 +200,7 @@ async def main():
                 prompt = text.replace("/img", "").strip()
 
                 if not prompt:
-                    send(chat_id, "❌ متن تصویر را بنویس")
+                    send(chat_id, "❌ متن بده")
                     continue
 
                 send(chat_id, "🎨 در حال ساخت تصویر...")
@@ -262,7 +210,7 @@ async def main():
                 if img:
                     send_photo(chat_id, img)
                 else:
-                    send(chat_id, "❌ خطا در ساخت تصویر")
+                    send(chat_id, "❌ ساخت تصویر فعلاً ممکن نیست")
 
                 continue
 
@@ -270,14 +218,11 @@ async def main():
             if not text:
                 continue
 
-            send(chat_id, "⏳ در حال فکر کردن...")
+            send(chat_id, "⏳ فکر می‌کنم...")
 
-            answer = await ask_ai(user_id, text)
+            answer = ask_ai(text)
 
             send(chat_id, answer[:3500])
-
-            await save_memory(user_id, "user", text)
-            await save_memory(user_id, "assistant", answer)
 
 
 if __name__ == "__main__":
