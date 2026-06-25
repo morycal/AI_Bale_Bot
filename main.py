@@ -69,16 +69,15 @@ def ask_ai(text):
 
         print("HF RESPONSE:", data)
 
-        if "choices" in data:
-            return data["choices"][0]["message"]["content"]
+        if "choices" not in data:
+            return "❌ پاسخ نامعتبر از هوش مصنوعی"
 
-        if "error" in data:
-            return f"❌ HF Error: {data['error']}"
+        msg = data["choices"][0]["message"]
 
-        return "❌ پاسخ نامعتبر از Hugging Face"
+        return msg.get("content", "❌ پاسخی دریافت نشد").strip()
 
     except Exception as e:
-        return f"❌ AI Error: {str(e)}"
+        return f"❌ AI Error: {e}"
 
 
 # ================= LOOP =================
