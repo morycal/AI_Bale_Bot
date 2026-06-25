@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("BALE_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 BASE = f"https://tapi.bale.ai/bot{TOKEN}"
@@ -42,40 +42,43 @@ def get_updates():
 # ================= AI =================
 
 def ask_ai(text):
+    try:
+        response = requests.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "Qwen/Qwen3-32B",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "تو یک دستیار هوش مصنوعی حرفه‌ای هستی و به فارسی پاسخ می‌دهی."
+                    },
+                    {
+                        "role": "user",
+                        "content": text
+                    }
+                ]
+            },
+            timeout=60
+        )
 
-    models = [
-        "meta-llama/llama-3.3-8b-instruct:free",
-        "google/gemma-2-9b-it:free",
-        "mistralai/mistral-7b-instruct:free"
-    ]
+        data = response.json()
 
-    for model in models:
-        try:
-            res = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": "تو یک دستیار هوشمند هستی."},
-                        {"role": "user", "content": text}
-                    ]
-                },
-                timeout=30
-            )
+        print("HF RESPONSE:", data)
 
-            data = res.json()
+        if "choices" in data:
+            return data["choices"][0]["message"]["content"]
 
-            if "choices" in data:
-                return data["choices"][0]["message"]["content"]
+        if "error" in data:
+            return f"❌ HF Error: {data['error']}"
 
-        except:
-            pass
+        return "❌ پاسخ نامعتبر از Hugging Face"
 
-    return "❌ هیچ مدل AI در دسترس نیست."
+    except Exception as e:
+        return f"❌ AI Error: {str(e)}"
 
 
 # ================= LOOP =================
