@@ -80,26 +80,6 @@ async def add_count(uid):
         await db.commit()
 
 
-async def set_vip(uid, value):
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute(
-            "UPDATE users SET vip=? WHERE user_id=?",
-            (value, uid)
-        )
-        await db.commit()
-
-
-async def ban(uid):
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute(
-            "UPDATE users SET banned=1 WHERE user_id=?",
-            (uid,)
-        )
-        await db.commit()
-
-
-# ---------------- MEMORY ----------------
-
 async def save_memory(uid, role, content):
     async with aiosqlite.connect("bot.db") as db:
 
@@ -117,8 +97,8 @@ async def save_memory(uid, role, content):
 
         rows = await cur.fetchall()
 
-        if len(rows) > 15:
-            for r in rows[15:]:
+        if len(rows) > 20:
+            for r in rows[20:]:
                 await db.execute("DELETE FROM memory WHERE id=?", (r[0],))
 
         await db.commit()
@@ -130,12 +110,11 @@ async def get_memory(uid):
             "SELECT role,content FROM memory WHERE user_id=? ORDER BY id ASC",
             (uid,)
         )
-
         rows = await cur.fetchall()
         return [{"role": r[0], "content": r[1]} for r in rows]
 
 
-# ---------------- AI ----------------
+# ---------------- AI (ChatGPT-like) ----------------
 
 async def ask_ai(uid, text):
 
@@ -143,14 +122,16 @@ async def ask_ai(uid, text):
 
     system = {
         "role": "system",
-        "content": "تو یک دستیار هوشمند، دقیق، خلاصه و کاربردی هستی."
+        "content": "تو یک دستیار شبیه ChatGPT هستی: دقیق، خلاصه، کاربردی، و دوستانه."
     }
 
     messages = [system] + memory + [{"role": "user", "content": text}]
 
     res = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}"
+        },
         json={
             "model": "deepseek/deepseek-r1:free",
             "messages": messages
@@ -167,14 +148,14 @@ async def ask_ai(uid, text):
     return answer
 
 
-# ---------------- KEYBOARDS ----------------
+# ---------------- UI ----------------
 
 def main_menu():
     return {
         "inline_keyboard": [
             [{"text": "💬 شروع چت", "callback_data": "chat"}],
             [{"text": "🧹 پاک کردن حافظه", "callback_data": "reset"}],
-            [{"text": "👑 پنل ادمین", "callback_data": "admin"}]
+            [{"text": "👑 ادمین", "callback_data": "admin"}]
         ]
     }
 
@@ -182,9 +163,7 @@ def main_menu():
 def admin_menu():
     return {
         "inline_keyboard": [
-            [{"text": "📊 آمار", "callback_data": "stats"}],
-            [{"text": "⭐ VIP دادن", "callback_data": "vip"}],
-            [{"text": "🚫 بن کاربر", "callback_data": "ban"}]
+            [{"text": "📊 آمار", "callback_data": "stats"}]
         ]
     }
 
@@ -193,7 +172,7 @@ def admin_menu():
 
 @bot.event
 async def on_ready():
-    print("🚀 BOT PRO MAX ONLINE")
+    print("🤖 ChatGPT BOT ONLINE")
 
 
 @bot.event
@@ -213,7 +192,11 @@ async def on_message(message):
 
     # START
     if text == "/start":
-        await message.reply("👋 خوش آمدی", reply_markup=main_menu())
+        await bot.send_message(
+            chat_id=uid,
+            text="👋 سلام! من دستیار هوش مصنوعی هستم.\nمثل ChatGPT می‌تونی باهام صحبت کنی.",
+            reply_markup=main_menu()
+        )
         return
 
     # RESET
@@ -222,29 +205,34 @@ async def on_message(message):
             await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
             await db.commit()
 
-        await message.reply("🧹 حافظه پاک شد")
+        await bot.send_message(chat_id=uid, text="🧹 حافظه پاک شد")
         return
 
     # LIMIT
     limit = VIP_LIMIT if user["vip"] else FREE_LIMIT
 
     if uid != ADMIN_ID and user["count"] >= limit:
-        await message.reply("❌ سهمیه تمام شد")
+        await bot.send_message(chat_id=uid, text="❌ سهمیه تمام شد")
         return
 
     await add_count(uid)
 
-    await message.reply("⏳ در حال پردازش...")
+    # typing simulation
+    await bot.send_message(chat_id=uid, text="⏳ در حال فکر کردن...")
 
     try:
         answer = await ask_ai(uid, text)
-        await message.reply(answer[:3500])
+
+        await bot.send_message(
+            chat_id=uid,
+            text=answer[:3500]
+        )
 
     except Exception as e:
-        await message.reply(f"خطا: {e}")
+        await bot.send_message(chat_id=uid, text=f"خطا: {e}")
 
 
-# ---------------- CALLBACKS ----------------
+# ---------------- CALLBACK ----------------
 
 @bot.event
 async def on_callback_query(call):
@@ -252,11 +240,9 @@ async def on_callback_query(call):
     uid = call.from_user.user_id
     data = call.data
 
-    # CHAT
     if data == "chat":
-        await call.message.reply("💬 سوالت رو بپرس")
+        await call.message.reply("💬 شروع کن سوالتو بپرس")
 
-    # RESET
     elif data == "reset":
         async with aiosqlite.connect("bot.db") as db:
             await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
@@ -264,25 +250,15 @@ async def on_callback_query(call):
 
         await call.message.reply("🧹 حافظه پاک شد")
 
-    # ADMIN
     elif data == "admin" and uid == ADMIN_ID:
         await call.message.reply("👑 پنل ادمین", reply_markup=admin_menu())
 
-    # STATS
     elif data == "stats" and uid == ADMIN_ID:
         async with aiosqlite.connect("bot.db") as db:
             cur = await db.execute("SELECT COUNT(*) FROM users")
             users = (await cur.fetchone())[0]
 
         await call.message.reply(f"👥 کاربران: {users}")
-
-    # VIP (دمو)
-    elif data == "vip" and uid == ADMIN_ID:
-        await call.message.reply("برای VIP باید نسخه کامل‌تر اضافه شود")
-
-    # BAN (دمو)
-    elif data == "ban" and uid == ADMIN_ID:
-        await call.message.reply("این بخش در نسخه بعدی کامل می‌شود")
 
 
 # ---------------- RUN ----------------
