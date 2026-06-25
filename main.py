@@ -89,77 +89,115 @@ def ask_ai(text):
 # ================= IMAGE (REPLICATE) =================
 
 def generate_image(prompt):
-    try:
-        res = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers={
-                "Authorization": f"Token {REPLICATE_API_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "version": "db21e45c...stable-diffusion-xl",  # SDXL model id
-                "input": {"prompt": prompt}
+
+    headers = {
+        "Authorization": f"Token {REPLICATE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    create = requests.post(
+        "https://api.replicate.com/v1/predictions",
+        headers=headers,
+        json={
+            "model": "black-forest-labs/flux-schnell",
+            "input": {
+                "prompt": prompt
             }
-        )
+        },
+        timeout=30
+    )
 
-        data = res.json()
+    data = create.json()
 
-        if "urls" in data:
-            get_url = data["urls"]["get"]
-
-            # poll
-            for _ in range(20):
-                r = requests.get(get_url, headers={
-                    "Authorization": f"Token {REPLICATE_API_TOKEN}"
-                }).json()
-
-                if r.get("status") == "succeeded":
-                    img_url = r["output"][0]
-                    return requests.get(img_url).content
-
+    if "urls" not in data:
+        print(data)
         return None
 
-    except Exception as e:
-        print("IMG ERROR:", e)
-        return None
+    get_url = data["urls"]["get"]
 
+    for _ in range(30):
+
+        result = requests.get(
+            get_url,
+            headers=headers,
+            timeout=30
+        ).json()
+
+        if result["status"] == "succeeded":
+
+            output = result.get("output")
+
+            if isinstance(output, list):
+                img_url = output[0]
+            else:
+                img_url = output
+
+            return requests.get(img_url).content
+
+        if result["status"] in ["failed", "canceled"]:
+            print(result)
+            return None
+
+        time.sleep(2)
+
+    return None
 
 # ================= VOICE (REPLICATE WHISPER) =================
 
-def voice_to_text(audio):
-    try:
-        res = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers={
-                "Authorization": f"Token {REPLICATE_API_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "version": "whisper-version-id",
-                "input": {
-                    "audio": audio
-                }
+def voice_to_text(audio_url):
+
+    headers = {
+        "Authorization": f"Token {REPLICATE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    create = requests.post(
+        "https://api.replicate.com/v1/predictions",
+        headers=headers,
+        json={
+            "model": "openai/whisper",
+            "input": {
+                "audio": audio_url
             }
-        )
+        },
+        timeout=30
+    )
 
-        data = res.json()
+    data = create.json()
 
-        if "urls" in data:
-            get_url = data["urls"]["get"]
-
-            for _ in range(20):
-                r = requests.get(get_url, headers={
-                    "Authorization": f"Token {REPLICATE_API_TOKEN}"
-                }).json()
-
-                if r.get("status") == "succeeded":
-                    return r["output"]["text"]
-
+    if "urls" not in data:
+        print(data)
         return ""
 
-    except Exception as e:
-        print("VOICE ERROR:", e)
-        return ""
+    get_url = data["urls"]["get"]
+
+    for _ in range(30):
+
+        result = requests.get(
+            get_url,
+            headers=headers,
+            timeout=30
+        ).json()
+
+        if result["status"] == "succeeded":
+
+            output = result.get("output")
+
+            if isinstance(output, str):
+                return output
+
+            if isinstance(output, dict):
+                return output.get("text", "")
+
+            return str(output)
+
+        if result["status"] in ["failed", "canceled"]:
+            print(result)
+            return ""
+
+        time.sleep(2)
+
+    return ""
 
 
 # ================= MAIN LOOP =================
