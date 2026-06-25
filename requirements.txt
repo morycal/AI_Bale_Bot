@@ -2,3 +2,4 @@ python-bale-bot
 requests
 python-dotenv
 aiosqlite
+gtts
