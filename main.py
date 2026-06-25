@@ -17,7 +17,20 @@ FREE_LIMIT = 30
 VIP_LIMIT = 300
 
 
-# ---------------- DB ----------------
+# ---------------- SAFE SEND (مهم‌ترین بخش) ----------------
+
+async def send(chat_id, text):
+    """
+    ارسال کاملاً سازگار با همه نسخه‌های bale-bot
+    بدون reply_markup برای جلوگیری از خطا
+    """
+    await bot._request("sendMessage", {
+        "chat_id": chat_id,
+        "text": text
+    })
+
+
+# ---------------- DATABASE ----------------
 
 async def init_db():
     async with aiosqlite.connect("bot.db") as db:
@@ -80,6 +93,8 @@ async def add_count(uid):
         await db.commit()
 
 
+# ---------------- MEMORY ----------------
+
 async def save_memory(uid, role, content):
     async with aiosqlite.connect("bot.db") as db:
 
@@ -114,7 +129,7 @@ async def get_memory(uid):
         return [{"role": r[0], "content": r[1]} for r in rows]
 
 
-# ---------------- AI (ChatGPT-like) ----------------
+# ---------------- AI ----------------
 
 async def ask_ai(uid, text):
 
@@ -122,16 +137,14 @@ async def ask_ai(uid, text):
 
     system = {
         "role": "system",
-        "content": "تو یک دستیار شبیه ChatGPT هستی: دقیق، خلاصه، کاربردی، و دوستانه."
+        "content": "تو یک دستیار هوش مصنوعی حرفه‌ای شبیه ChatGPT هستی. کوتاه، دقیق و کاربردی جواب بده."
     }
 
     messages = [system] + memory + [{"role": "user", "content": text}]
 
     res = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}"
-        },
+        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
         json={
             "model": "deepseek/deepseek-r1:free",
             "messages": messages
@@ -148,31 +161,11 @@ async def ask_ai(uid, text):
     return answer
 
 
-# ---------------- UI ----------------
-
-def main_menu():
-    return {
-        "inline_keyboard": [
-            [{"text": "💬 شروع چت", "callback_data": "chat"}],
-            [{"text": "🧹 پاک کردن حافظه", "callback_data": "reset"}],
-            [{"text": "👑 ادمین", "callback_data": "admin"}]
-        ]
-    }
-
-
-def admin_menu():
-    return {
-        "inline_keyboard": [
-            [{"text": "📊 آمار", "callback_data": "stats"}]
-        ]
-    }
-
-
 # ---------------- EVENTS ----------------
 
 @bot.event
 async def on_ready():
-    print("🤖 ChatGPT BOT ONLINE")
+    print("🤖 BOT ONLINE (STABLE VERSION)")
 
 
 @bot.event
@@ -192,11 +185,7 @@ async def on_message(message):
 
     # START
     if text == "/start":
-        await bot.send_message(
-            chat_id=uid,
-            text="👋 سلام! من دستیار هوش مصنوعی هستم.\nمثل ChatGPT می‌تونی باهام صحبت کنی.",
-            reply_markup=main_menu()
-        )
+        await send(uid, "👋 سلام!\nمن دستیار هوش مصنوعی هستم (مثل ChatGPT).")
         return
 
     # RESET
@@ -205,60 +194,26 @@ async def on_message(message):
             await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
             await db.commit()
 
-        await bot.send_message(chat_id=uid, text="🧹 حافظه پاک شد")
+        await send(uid, "🧹 حافظه پاک شد")
         return
 
     # LIMIT
     limit = VIP_LIMIT if user["vip"] else FREE_LIMIT
 
     if uid != ADMIN_ID and user["count"] >= limit:
-        await bot.send_message(chat_id=uid, text="❌ سهمیه تمام شد")
+        await send(uid, "❌ سهمیه روزانه شما تمام شده است")
         return
 
     await add_count(uid)
 
-    # typing simulation
-    await bot.send_message(chat_id=uid, text="⏳ در حال فکر کردن...")
+    await send(uid, "⏳ در حال فکر کردن...")
 
     try:
         answer = await ask_ai(uid, text)
-
-        await bot.send_message(
-            chat_id=uid,
-            text=answer[:3500]
-        )
+        await send(uid, answer[:3500])
 
     except Exception as e:
-        await bot.send_message(chat_id=uid, text=f"خطا: {e}")
-
-
-# ---------------- CALLBACK ----------------
-
-@bot.event
-async def on_callback_query(call):
-
-    uid = call.from_user.user_id
-    data = call.data
-
-    if data == "chat":
-        await call.message.reply("💬 شروع کن سوالتو بپرس")
-
-    elif data == "reset":
-        async with aiosqlite.connect("bot.db") as db:
-            await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
-            await db.commit()
-
-        await call.message.reply("🧹 حافظه پاک شد")
-
-    elif data == "admin" and uid == ADMIN_ID:
-        await call.message.reply("👑 پنل ادمین", reply_markup=admin_menu())
-
-    elif data == "stats" and uid == ADMIN_ID:
-        async with aiosqlite.connect("bot.db") as db:
-            cur = await db.execute("SELECT COUNT(*) FROM users")
-            users = (await cur.fetchone())[0]
-
-        await call.message.reply(f"👥 کاربران: {users}")
+        await send(uid, f"خطا: {e}")
 
 
 # ---------------- RUN ----------------
