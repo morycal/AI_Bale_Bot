@@ -16,6 +16,7 @@ bot = bale.Bot(TOKEN)
 FREE_LIMIT = 30
 VIP_LIMIT = 300
 
+
 # ---------------- DB ----------------
 
 async def init_db():
@@ -61,12 +62,12 @@ async def get_user(uid, name):
                 (uid, name)
             )
             await db.commit()
-            return {"vip": 0, "count": 0, "banned": 0}
+            return {"count": 0, "banned": 0, "vip": 0}
 
         return {
-            "vip": u[4],
             "count": u[2],
-            "banned": u[3]
+            "banned": u[3],
+            "vip": u[4]
         }
 
 
@@ -88,7 +89,7 @@ async def set_vip(uid, value):
         await db.commit()
 
 
-async def ban_user(uid):
+async def ban(uid):
     async with aiosqlite.connect("bot.db") as db:
         await db.execute(
             "UPDATE users SET banned=1 WHERE user_id=?",
@@ -116,8 +117,8 @@ async def save_memory(uid, role, content):
 
         rows = await cur.fetchall()
 
-        if len(rows) > 12:
-            for r in rows[12:]:
+        if len(rows) > 15:
+            for r in rows[15:]:
                 await db.execute("DELETE FROM memory WHERE id=?", (r[0],))
 
         await db.commit()
@@ -129,6 +130,7 @@ async def get_memory(uid):
             "SELECT role,content FROM memory WHERE user_id=? ORDER BY id ASC",
             (uid,)
         )
+
         rows = await cur.fetchall()
         return [{"role": r[0], "content": r[1]} for r in rows]
 
@@ -139,14 +141,14 @@ async def ask_ai(uid, text):
 
     memory = await get_memory(uid)
 
-    system_prompt = {
+    system = {
         "role": "system",
-        "content": "تو یک دستیار هوش مصنوعی حرفه‌ای، دقیق و خلاصه هستی."
+        "content": "تو یک دستیار هوشمند، دقیق، خلاصه و کاربردی هستی."
     }
 
-    messages = [system_prompt] + memory + [{"role": "user", "content": text}]
+    messages = [system] + memory + [{"role": "user", "content": text}]
 
-    response = requests.post(
+    res = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
         json={
@@ -156,7 +158,7 @@ async def ask_ai(uid, text):
         timeout=60
     )
 
-    data = response.json()
+    data = res.json()
     answer = data["choices"][0]["message"]["content"]
 
     await save_memory(uid, "user", text)
@@ -165,29 +167,33 @@ async def ask_ai(uid, text):
     return answer
 
 
-# ---------------- MENU ----------------
+# ---------------- KEYBOARDS ----------------
 
 def main_menu():
-    return bale.InlineKeyboardMarkup([
-        [bale.InlineKeyboardButton("🧠 چت", callback_data="chat")],
-        [bale.InlineKeyboardButton("🧹 پاک کردن حافظه", callback_data="reset")],
-        [bale.InlineKeyboardButton("👑 پنل ادمین", callback_data="admin")]
-    ])
+    return {
+        "inline_keyboard": [
+            [{"text": "💬 شروع چت", "callback_data": "chat"}],
+            [{"text": "🧹 پاک کردن حافظه", "callback_data": "reset"}],
+            [{"text": "👑 پنل ادمین", "callback_data": "admin"}]
+        ]
+    }
 
 
 def admin_menu():
-    return bale.InlineKeyboardMarkup([
-        [bale.InlineKeyboardButton("📊 آمار", callback_data="stats")],
-        [bale.InlineKeyboardButton("🚫 بن کاربر", callback_data="ban")],
-        [bale.InlineKeyboardButton("⭐ VIP", callback_data="vip")]
-    ])
+    return {
+        "inline_keyboard": [
+            [{"text": "📊 آمار", "callback_data": "stats"}],
+            [{"text": "⭐ VIP دادن", "callback_data": "vip"}],
+            [{"text": "🚫 بن کاربر", "callback_data": "ban"}]
+        ]
+    }
 
 
 # ---------------- EVENTS ----------------
 
 @bot.event
 async def on_ready():
-    print("BOT ONLINE (PRO VERSION)")
+    print("🚀 BOT PRO MAX ONLINE")
 
 
 @bot.event
@@ -244,32 +250,39 @@ async def on_message(message):
 async def on_callback_query(call):
 
     uid = call.from_user.user_id
+    data = call.data
 
-    if call.data == "chat":
+    # CHAT
+    if data == "chat":
         await call.message.reply("💬 سوالت رو بپرس")
 
-    elif call.data == "reset":
+    # RESET
+    elif data == "reset":
         async with aiosqlite.connect("bot.db") as db:
             await db.execute("DELETE FROM memory WHERE user_id=?", (uid,))
             await db.commit()
 
-        await call.message.reply("🧹 پاک شد")
+        await call.message.reply("🧹 حافظه پاک شد")
 
-    elif call.data == "admin" and uid == ADMIN_ID:
+    # ADMIN
+    elif data == "admin" and uid == ADMIN_ID:
         await call.message.reply("👑 پنل ادمین", reply_markup=admin_menu())
 
-    elif call.data == "stats" and uid == ADMIN_ID:
+    # STATS
+    elif data == "stats" and uid == ADMIN_ID:
         async with aiosqlite.connect("bot.db") as db:
             cur = await db.execute("SELECT COUNT(*) FROM users")
             users = (await cur.fetchone())[0]
 
         await call.message.reply(f"👥 کاربران: {users}")
 
-    elif call.data == "vip" and uid == ADMIN_ID:
-        await call.message.reply("برای VIP باید دستی فعال شود (قابل توسعه)")
+    # VIP (دمو)
+    elif data == "vip" and uid == ADMIN_ID:
+        await call.message.reply("برای VIP باید نسخه کامل‌تر اضافه شود")
 
-    elif call.data == "ban" and uid == ADMIN_ID:
-        await call.message.reply("ارسال ID کاربر برای بن (نسخه بعدی توسعه می‌دهیم)")
+    # BAN (دمو)
+    elif data == "ban" and uid == ADMIN_ID:
+        await call.message.reply("این بخش در نسخه بعدی کامل می‌شود")
 
 
 # ---------------- RUN ----------------
